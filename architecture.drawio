@@ -1,0 +1,180 @@
+<mxfile host="65bd71144e">
+    <diagram id="webai-auto-architecture" name="Architecture">
+        <mxGraphModel dx="543" dy="260" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="900" math="0" shadow="0" adaptiveColors="auto">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="client-zone" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EFF6FF;strokeColor=#93C5FD;fontStyle=1;fontSize=16;verticalAlign=top;spacingTop=12;" value="CLIENT / FRONTEND" vertex="1">
+                    <mxGeometry height="720" width="260" x="20" y="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="backend-zone" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#94A3B8;fontStyle=1;fontSize=16;verticalAlign=top;spacingTop=12;" value="APPLICATION SERVER â€” FASTAPI" vertex="1">
+                    <mxGeometry height="720" width="750" x="310" y="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="provider-zone" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7ED;strokeColor=#FDBA74;fontStyle=1;fontSize=15;verticalAlign=top;spacingTop=12;" value="EXTERNAL AI PROVIDER" vertex="1">
+                    <mxGeometry height="260" width="340" x="1090" y="170" as="geometry"/>
+                </mxCell>
+                <mxCell id="db-zone" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0FDF4;strokeColor=#86EFAC;fontStyle=1;fontSize=15;verticalAlign=top;spacingTop=12;" value="PERSISTENCE" vertex="1">
+                    <mxGeometry height="250" width="340" x="1090" y="490" as="geometry"/>
+                </mxCell>
+                <mxCell id="user" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#64748B;fontStyle=1;" value="User / browser" vertex="1">
+                    <mxGeometry height="50" width="190" x="55" y="135" as="geometry"/>
+                </mxCell>
+                <mxCell id="react" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DBEAFE;strokeColor=#3B82F6;" value="&lt;b&gt;React SPA (Vite build)&lt;/b&gt;&lt;br&gt;React Router pages&lt;br&gt;AuthContext + generators&lt;br&gt;Login, admin, image, video, website" vertex="1">
+                    <mxGeometry height="115" width="210" x="45" y="220" as="geometry"/>
+                </mxCell>
+                <mxCell id="api-client" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#60A5FA;" value="&lt;b&gt;frontend/src/api.js&lt;/b&gt;&lt;br&gt;fetch + same-origin credentials&lt;br&gt;JSON errors; video uses fetch/blob" vertex="1">
+                    <mxGeometry height="95" width="210" x="45" y="375" as="geometry"/>
+                </mxCell>
+                <mxCell id="vite" parent="1" style="rounded=1;dashed=1;whiteSpace=wrap;html=1;fillColor=#F8FAFC;strokeColor=#94A3B8;fontColor=#475569;" value="&lt;b&gt;Vite dev only&lt;/b&gt;&lt;br&gt;/api proxy â†’ 127.0.0.1:8000" vertex="1">
+                    <mxGeometry height="65" width="210" x="45" y="510" as="geometry"/>
+                </mxCell>
+                <mxCell id="dist" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#60A5FA;" value="&lt;b&gt;Production static assets&lt;/b&gt;&lt;br&gt;frontend/dist/index.html + /assets&lt;br&gt;served by FastAPI" vertex="1">
+                    <mxGeometry height="90" width="210" x="45" y="620" as="geometry"/>
+                </mxCell>
+                <mxCell id="fastapi" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1D4ED8;strokeColor=#1E40AF;fontColor=#FFFFFF;fontStyle=1;" value="&lt;b&gt;app/main.py â€” FastAPI&lt;/b&gt;&lt;br&gt;SessionMiddleware; registers routers; DB pool lifecycle&lt;br&gt;Serves /assets and SPA fallback" vertex="1">
+                    <mxGeometry height="75" width="690" x="340" y="130" as="geometry"/>
+                </mxCell>
+                <mxCell id="auth-router" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0E7FF;strokeColor=#6366F1;" value="&lt;b&gt;Auth API&lt;/b&gt;&lt;br&gt;/api/auth/*, /api/config" vertex="1">
+                    <mxGeometry height="75" width="130" x="335" y="250" as="geometry"/>
+                </mxCell>
+                <mxCell id="image-router" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0E7FF;strokeColor=#6366F1;" value="&lt;b&gt;Image router&lt;/b&gt;&lt;br&gt;/api/image/generate" vertex="1">
+                    <mxGeometry height="75" width="130" x="475" y="250" as="geometry"/>
+                </mxCell>
+                <mxCell id="video-router" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0E7FF;strokeColor=#6366F1;" value="&lt;b&gt;Video router&lt;/b&gt;&lt;br&gt;/api/video/generate" vertex="1">
+                    <mxGeometry height="75" width="130" x="615" y="250" as="geometry"/>
+                </mxCell>
+                <mxCell id="website-router" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0E7FF;strokeColor=#6366F1;" value="&lt;b&gt;Website router&lt;/b&gt;&lt;br&gt;/api/website/generate" vertex="1">
+                    <mxGeometry height="75" width="130" x="755" y="250" as="geometry"/>
+                </mxCell>
+                <mxCell id="admin-router" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0E7FF;strokeColor=#6366F1;" value="&lt;b&gt;Admin router&lt;/b&gt;&lt;br&gt;/api/admin/summary&lt;br&gt;/api/admin/users" vertex="1">
+                    <mxGeometry height="75" width="130" x="895" y="250" as="geometry"/>
+                </mxCell>
+                <mxCell id="pages-router" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0E7FF;strokeColor=#6366F1;" value="&lt;b&gt;Pages router&lt;/b&gt;&lt;br&gt;/ + /{path} SPA fallback" vertex="1">
+                    <mxGeometry height="65" width="130" x="895" y="350" as="geometry"/>
+                </mxCell>
+                <mxCell id="assets-api" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0E7FF;strokeColor=#6366F1;" value="&lt;b&gt;Generation assets API&lt;/b&gt;&lt;br&gt;/api/generations/.../assets&lt;br&gt;Owner-checked retrieval" vertex="1">
+                    <mxGeometry height="65" width="130" x="755" y="350" as="geometry"/>
+                </mxCell>
+                <mxCell id="deps" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1F5F9;strokeColor=#64748B;" value="&lt;b&gt;Core / dependencies&lt;/b&gt;&lt;br&gt;Session user lookup&lt;br&gt;require_user / require_admin&lt;br&gt;Config + password security" vertex="1">
+                    <mxGeometry height="110" width="205" x="350" y="430" as="geometry"/>
+                </mxCell>
+                <mxCell id="auth-service" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#22C55E;" value="&lt;b&gt;Auth service&lt;/b&gt;&lt;br&gt;Register / authenticate&lt;br&gt;Read users + roles; admin list/count" vertex="1">
+                    <mxGeometry height="110" width="205" x="590" y="430" as="geometry"/>
+                </mxCell>
+                <mxCell id="ai-services" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEDD5;strokeColor=#F97316;" value="&lt;b&gt;AI services&lt;/b&gt;&lt;br&gt;ai_image / ai_video / ai_website&lt;br&gt;Server-side provider calls; validate results" vertex="1">
+                    <mxGeometry height="110" width="200" x="830" y="430" as="geometry"/>
+                </mxCell>
+                <mxCell id="pool" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#22C55E;" value="&lt;b&gt;psycopg ConnectionPool&lt;/b&gt;&lt;br&gt;DATABASE_URL; auth/admin/generations" vertex="1">
+                    <mxGeometry height="70" width="195" x="595" y="610" as="geometry"/>
+                </mxCell>
+                <mxCell id="storage-files" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEDD5;strokeColor=#F97316;" value="&lt;b&gt;Local persistent storage/&lt;/b&gt;&lt;br&gt;storage/generations/{id}/&lt;br&gt;Image, MP4, website JSON files" vertex="1">
+                    <mxGeometry height="80" width="205" x="825" y="605" as="geometry"/>
+                </mxCell>
+                <mxCell id="pollinations" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEDD5;strokeColor=#F97316;" value="&lt;b&gt;Pollinations API&lt;/b&gt;&lt;br&gt;Image generation&lt;br&gt;Video generation&lt;br&gt;Chat completions (website copy)&lt;br&gt;POLLINATIONS_API_KEY stays on server" vertex="1">
+                    <mxGeometry height="150" width="280" x="1120" y="235" as="geometry"/>
+                </mxCell>
+                <mxCell id="postgres" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCFCE7;strokeColor=#22C55E;" value="&lt;b&gt;PostgreSQL 13+&lt;/b&gt;&lt;br&gt;users, roles: account/auth/admin&lt;br&gt;ai_generations: prompt, settings, status&lt;br&gt;generation_assets: file paths + metadata" vertex="1">
+                    <mxGeometry height="115" width="280" x="1120" y="555" as="geometry"/>
+                </mxCell>
+                <mxCell id="schema-note" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FEFCE8;strokeColor=#EAB308;fontSize=11;" value="Other schema areas (billing, credits, subscriptions, websites/versions) are not wired into runtime yet." vertex="1">
+                    <mxGeometry height="45" width="300" x="1110" y="680" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-user-react" edge="1" parent="1" source="user" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="react" value="uses">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-react-api" edge="1" parent="1" source="react" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#3B82F6;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="api-client" value="UI calls">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-api-main" edge="1" parent="1" source="api-client" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2563EB;strokeWidth=2;startArrow=classic;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="fastapi" value="HTTP JSON + session cookie; responses">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-vite-main" edge="1" parent="1" source="vite" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#94A3B8;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="fastapi" value="dev proxy only">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-main-dist" edge="1" parent="1" source="fastapi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#60A5FA;startArrow=classic;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="dist" value="serves SPA/assets">
+                    <mxGeometry relative="1" x="0.0661" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e-main-auth" edge="1" parent="1" source="fastapi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="auth-router" value="registers">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-main-image" edge="1" parent="1" source="fastapi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;" target="image-router" value="">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-main-video" edge="1" parent="1" source="fastapi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;" target="video-router" value="">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-main-website" edge="1" parent="1" source="fastapi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;" target="website-router" value="">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-main-admin" edge="1" parent="1" source="fastapi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;" target="admin-router" value="">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-main-pages" edge="1" parent="1" source="fastapi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;" target="pages-router" value="">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-main-assets" edge="1" parent="1" source="fastapi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;" target="assets-api" value="">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-auth-deps" edge="1" parent="1" source="auth-router" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="deps" value="session user">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-admin-deps" edge="1" parent="1" source="admin-router" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="deps" value="admin guard">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-image-deps" edge="1" parent="1" source="image-router" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="deps" value="auth check">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-video-deps" edge="1" parent="1" source="video-router" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="deps" value="auth check">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-website-deps" edge="1" parent="1" source="website-router" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#64748B;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="deps" value="auth check">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-auth-service" edge="1" parent="1" source="deps" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#22C55E;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="auth-service" value="auth + admin operations">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-auth-router-service" edge="1" parent="1" source="auth-router" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#22C55E;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="auth-service" value="login/register">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-admin-service" edge="1" parent="1" source="admin-router" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#22C55E;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="auth-service" value="summary/users">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-assets-pool" edge="1" parent="1" source="assets-api" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#22C55E;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="pool" value="owner check + metadata">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-assets-storage" edge="1" parent="1" source="assets-api" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F97316;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="storage-files" value="authorized file response">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-pool" edge="1" parent="1" source="auth-service" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#22C55E;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="pool" value="DB access">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-db" edge="1" parent="1" source="pool" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#22C55E;strokeWidth=2;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="postgres" value="SQL">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-ai-pool" edge="1" parent="1" source="ai-services" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#22C55E;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="pool" value="save generation + asset records">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-ai-storage" edge="1" parent="1" source="ai-services" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F97316;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="storage-files" value="persist output files">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-image-ai" edge="1" parent="1" source="image-router" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F97316;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="ai-services" value="prompt/options">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-video-ai" edge="1" parent="1" source="video-router" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F97316;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="ai-services" value="prompt/options">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-website-ai" edge="1" parent="1" source="website-router" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F97316;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="ai-services" value="prompt/options">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-ai-provider" edge="1" parent="1" source="ai-services" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F97316;strokeWidth=2;startArrow=classic;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="pollinations" value="server-side HTTPS requests / generated outputs">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-results" edge="1" parent="1" source="ai-services" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F97316;startArrow=classic;endArrow=classic;labelBackgroundColor=default;defaultLabelBackgroundColor=page;labelPlacement=auto;" target="api-client" value="result + generation/asset IDs">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

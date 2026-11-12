@@ -1,0 +1,579 @@
+-- WebAiAuto database schema (v2)
+-- Target: PostgreSQL 13+
+-- Run once against a new, empty database. This is an initial schema, not a
+-- migration for a database created with an earlier version of this file.
+--
+-- Keep provider API keys and other secrets in environment variables or a
+-- secrets manager. Do not store them in ai_models.config.
+--
+-- Credit operations must be performed in one database transaction:
+-- 1. Debit with UPDATE users SET credits_balance = credits_balance - :cost
+--    WHERE id = :user_id AND credits_balance >= :cost RETURNING id.
+--    (This also locks the user row, so concurrent requests are serialized.)
+-- 2. If no row is returned, roll back and report insufficient credits.
+-- 3. Check the daily limit with generations_today(:user_id) against
+--    plans.max_daily_generations (NULL = unlimited); roll back if exceeded.
+-- 4. Insert the ai_generations row, then the matching credit_transactions row
+--    (type spend_*, negative amount, generation_id set).
+-- 5. If a generation later fails, credit the user back in one transaction:
+--    UPDATE users SET credits_balance = credits_balance + :cost, and insert a
+--    credit_transactions row of type generation_refund (once per generation).
+-- Never accept a credit cost supplied by the browser.
+--
+-- Run SELECT * FROM v_credit_balance_mismatch periodically; it must be empty.
+
+BEGIN;
+
+-- 1. Access-control roles. Subscription plans are stored separately below.
+CREATE TABLE roles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(50) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT roles_code_not_blank CHECK (btrim(code) <> '')
+);
+
+-- 2. Account and credit balance.
+-- Accounts are soft-deleted (deleted_at). On deletion, anonymize email and
+-- full_name instead of removing the row, so payments and the ledger stay valid.
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    full_name VARCHAR(100),
+    role_id UUID NOT NULL
+        DEFAULT '00000000-0000-0000-0000-000000000001'
+        REFERENCES roles(id) ON DELETE RESTRICT,
+    credits_balance INTEGER NOT NULL DEFAULT 10,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    email_verified_at TIMESTAMPTZ,
+    last_login_at TIMESTAMPTZ,
+    deleted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT users_email_not_blank CHECK (btrim(email) <> ''),
+    CONSTRAINT users_password_hash_not_blank CHECK (btrim(password_hash) <> ''),
+    CONSTRAINT users_credits_nonnegative CHECK (credits_balance >= 0)
+);
+
+-- Email addresses are unique regardless of letter case.
+CREATE UNIQUE INDEX ux_users_email_lower ON users (lower(email));
+
+-- 3. Plans and generation limits. A NULL limit means unlimited.
+CREATE TABLE plans (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(50) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    price_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    currency VARCHAR(10) NOT NULL DEFAULT 'VND',
+    billing_interval VARCHAR(20) NOT NULL DEFAULT 'none',
+    credits_per_period INTEGER NOT NULL DEFAULT 0,
+    max_daily_generations INTEGER,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT plans_code_not_blank CHECK (btrim(code) <> ''),
+    CONSTRAINT plans_price_nonnegative CHECK (price_amount >= 0),
+    CONSTRAINT plans_credits_nonnegative CHECK (credits_per_period >= 0),
+    CONSTRAINT plans_daily_limit_positive CHECK (
+        max_daily_generations IS NULL OR max_daily_generations > 0
+    ),
+    CONSTRAINT plans_billing_interval_valid CHECK (
+        billing_interval IN ('none', 'month', 'year')
+    )
+);
+
+-- 4. AI providers/models. config may contain public, non-secret parameters.
+-- Do not delete models that have generations: set is_active = FALSE instead.
+-- cost_per_use is the base cost; compute the final cost on the server from
+-- the request settings (e.g. video duration/resolution) and store it in
+-- ai_generations.cost_credits.
+CREATE TABLE ai_models (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider VARCHAR(100) NOT NULL,
+    model_key VARCHAR(150) NOT NULL,
+    name VARCHAR(150) NOT NULL,
+    type VARCHAR(20) NOT NULL,
+    cost_per_use INTEGER NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    config JSONB NOT NULL DEFAULT '{}'::JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ai_models_provider_key_unique UNIQUE (provider, model_key),
+    -- Lets ai_generations reference (id, type) so a generation's type always
+    -- matches its model's type.
+    CONSTRAINT ai_models_id_type_unique UNIQUE (id, type),
+    CONSTRAINT ai_models_type_valid CHECK (type IN ('image', 'video', 'website')),
+    CONSTRAINT ai_models_cost_nonnegative CHECK (cost_per_use >= 0),
+    CONSTRAINT ai_models_config_object CHECK (jsonb_typeof(config) = 'object')
+);
+
+-- 5. User subscriptions and their billing periods.
+-- Period credits must be granted once per period: use credit_transactions with
+-- idempotency_key = 'sub:' || subscription_id || ':' || current_period_start.
+CREATE TABLE subscriptions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    plan_id UUID NOT NULL REFERENCES plans(id) ON DELETE RESTRICT,
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    provider VARCHAR(50),
+    provider_subscription_id VARCHAR(255),
+    current_period_start TIMESTAMPTZ,
+    current_period_end TIMESTAMPTZ,
+    cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
+    ended_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT subscriptions_status_valid CHECK (
+        status IN ('active', 'canceled', 'expired', 'past_due', 'trialing')
+    ),
+    CONSTRAINT subscriptions_period_valid CHECK (
+        current_period_end IS NULL
+        OR current_period_start IS NULL
+        OR current_period_end > current_period_start
+    )
+);
+
+CREATE UNIQUE INDEX ux_subscriptions_provider_id
+    ON subscriptions (provider, provider_subscription_id)
+    WHERE provider_subscription_id IS NOT NULL;
+
+CREATE UNIQUE INDEX ux_subscriptions_one_current_per_user
+    ON subscriptions (user_id)
+    WHERE status IN ('active', 'past_due', 'trialing');
+
+-- 6. Payment transactions. Amount is the monetary amount, not a credit count.
+-- subscription_id is set when the payment is for a plan; NULL for one-off top-ups.
+-- Partial refunds are not modelled here; add a refunds table if you need them.
+CREATE TABLE transactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    subscription_id UUID REFERENCES subscriptions(id) ON DELETE RESTRICT,
+    amount NUMERIC(12, 2) NOT NULL,
+    currency VARCHAR(10) NOT NULL DEFAULT 'VND',
+    gateway VARCHAR(50) NOT NULL,
+    gateway_transaction_id VARCHAR(255),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT transactions_amount_positive CHECK (amount > 0),
+    CONSTRAINT transactions_status_valid CHECK (
+        status IN ('pending', 'succeeded', 'failed', 'canceled', 'refunded')
+    ),
+    CONSTRAINT transactions_metadata_object CHECK (jsonb_typeof(metadata) = 'object')
+);
+
+CREATE UNIQUE INDEX ux_transactions_gateway_id
+    ON transactions (gateway, gateway_transaction_id)
+    WHERE gateway_transaction_id IS NOT NULL;
+
+-- 7. Raw webhook events from payment gateways, for idempotent processing.
+-- Handler pattern:
+--   INSERT INTO payment_events (...) VALUES (...) ON CONFLICT (gateway, event_id) DO NOTHING
+--   RETURNING id;
+-- If no row is returned the event was already received: acknowledge and stop.
+-- Verify the gateway signature before inserting. Do not store secrets or
+-- signature keys in payload.
+CREATE TABLE payment_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    gateway VARCHAR(50) NOT NULL,
+    event_id VARCHAR(255) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    transaction_id UUID REFERENCES transactions(id) ON DELETE RESTRICT,
+    payload JSONB NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'received',
+    error_message TEXT,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMPTZ,
+    CONSTRAINT payment_events_gateway_event_unique UNIQUE (gateway, event_id),
+    CONSTRAINT payment_events_status_valid CHECK (
+        status IN ('received', 'processed', 'failed', 'ignored')
+    ),
+    CONSTRAINT payment_events_payload_object CHECK (jsonb_typeof(payload) = 'object'),
+    CONSTRAINT payment_events_processed_has_time CHECK (
+        status NOT IN ('processed', 'ignored') OR processed_at IS NOT NULL
+    )
+);
+
+-- 8. AI generation jobs. Keep the user's prompt and generation settings here;
+-- output files are stored under the application's storage/ directory;
+-- generation_assets stores their relative paths and metadata.
+-- The composite foreign key guarantees type matches the model's type.
+CREATE TABLE ai_generations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    model_id UUID,
+    type VARCHAR(20) NOT NULL,
+    prompt TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'queued',
+    cost_credits INTEGER NOT NULL DEFAULT 0,
+    provider_job_id VARCHAR(255),
+    settings JSONB NOT NULL DEFAULT '{}'::JSONB,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    CONSTRAINT ai_generations_model_type_fk
+        FOREIGN KEY (model_id, type) REFERENCES ai_models (id, type)
+        ON DELETE RESTRICT,
+    CONSTRAINT ai_generations_type_valid CHECK (type IN ('image', 'video', 'website')),
+    CONSTRAINT ai_generations_status_valid CHECK (
+        status IN ('queued', 'processing', 'completed', 'failed', 'canceled')
+    ),
+    CONSTRAINT ai_generations_cost_nonnegative CHECK (cost_credits >= 0),
+    CONSTRAINT ai_generations_prompt_not_blank CHECK (btrim(prompt) <> ''),
+    CONSTRAINT ai_generations_settings_object CHECK (jsonb_typeof(settings) = 'object'),
+    CONSTRAINT ai_generations_completed_has_time CHECK (
+        status <> 'completed' OR completed_at IS NOT NULL
+    ),
+    CONSTRAINT ai_generations_failed_has_error CHECK (
+        status <> 'failed' OR error_message IS NOT NULL
+    ),
+    CONSTRAINT ai_generations_time_order CHECK (
+        started_at IS NULL OR completed_at IS NULL OR completed_at >= started_at
+    )
+);
+
+-- One provider job id maps to one generation (prevents duplicate webhook records).
+CREATE UNIQUE INDEX ux_ai_generations_provider_job
+    ON ai_generations (model_id, provider_job_id)
+    WHERE provider_job_id IS NOT NULL;
+
+-- 9. One generation can produce multiple output files.
+CREATE TABLE generation_assets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    generation_id UUID NOT NULL REFERENCES ai_generations(id) ON DELETE CASCADE,
+    asset_type VARCHAR(20) NOT NULL DEFAULT 'output',
+    storage_url TEXT NOT NULL,
+    content_type VARCHAR(150),
+    file_size_bytes BIGINT,
+    position INTEGER NOT NULL DEFAULT 0,
+    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT generation_assets_type_valid CHECK (
+        asset_type IN ('output', 'thumbnail', 'source')
+    ),
+    CONSTRAINT generation_assets_url_not_blank CHECK (btrim(storage_url) <> ''),
+    CONSTRAINT generation_assets_file_size_nonnegative CHECK (
+        file_size_bytes IS NULL OR file_size_bytes >= 0
+    ),
+    CONSTRAINT generation_assets_position_nonnegative CHECK (position >= 0),
+    CONSTRAINT generation_assets_metadata_object CHECK (jsonb_typeof(metadata) = 'object'),
+    CONSTRAINT generation_assets_position_unique UNIQUE (generation_id, asset_type, position)
+);
+
+-- 10. Append-only credit ledger (UPDATE/DELETE are blocked by trigger below).
+-- Positive amount adds credits; negative amount spends credits.
+--   refund            : money refunded for a payment (credits added back/granted)
+--   generation_refund : credits returned because a generation failed or was canceled
+-- Keep this ledger even when a payment is refunded.
+CREATE TABLE credit_transactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    amount INTEGER NOT NULL,
+    type VARCHAR(30) NOT NULL,
+    description TEXT,
+    payment_transaction_id UUID REFERENCES transactions(id) ON DELETE RESTRICT,
+    generation_id UUID REFERENCES ai_generations(id) ON DELETE RESTRICT,
+    idempotency_key VARCHAR(255) UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT credit_transactions_amount_nonzero CHECK (amount <> 0),
+    CONSTRAINT credit_transactions_type_valid CHECK (
+        type IN (
+            'topup',
+            'spend_image',
+            'spend_video',
+            'spend_website',
+            'subscription_credit',
+            'bonus',
+            'refund',
+            'generation_refund',
+            'adjustment'
+        )
+    ),
+    CONSTRAINT credit_transactions_amount_matches_type CHECK (
+        (type IN ('topup', 'subscription_credit', 'bonus', 'refund', 'generation_refund')
+            AND amount > 0)
+        OR (type IN ('spend_image', 'spend_video', 'spend_website') AND amount < 0)
+        OR type = 'adjustment'
+    ),
+    CONSTRAINT credit_transactions_generation_required CHECK (
+        type NOT IN ('spend_image', 'spend_video', 'spend_website', 'generation_refund')
+        OR generation_id IS NOT NULL
+    )
+);
+
+-- A generation is charged at most once and refunded at most once.
+CREATE UNIQUE INDEX ux_credit_one_spend_per_generation
+    ON credit_transactions (generation_id)
+    WHERE type IN ('spend_image', 'spend_video', 'spend_website');
+
+CREATE UNIQUE INDEX ux_credit_one_refund_per_generation
+    ON credit_transactions (generation_id)
+    WHERE type = 'generation_refund';
+
+-- 11. Login sessions / refresh tokens.
+-- Store only a hash (e.g. SHA-256) of the refresh token, never the token itself.
+-- Rotate on refresh: revoke the old row and insert a new one.
+CREATE TABLE sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    refresh_token_hash VARCHAR(255) NOT NULL UNIQUE,
+    user_agent TEXT,
+    ip_address INET,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    CONSTRAINT sessions_token_hash_not_blank CHECK (btrim(refresh_token_hash) <> ''),
+    CONSTRAINT sessions_expiry_valid CHECK (expires_at > created_at)
+);
+
+-- 12. Generated websites. A website has many immutable versions; each version
+-- points to a bundle (usually produced by a 'website' generation).
+CREATE TABLE websites (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    name VARCHAR(150) NOT NULL,
+    slug VARCHAR(63) NOT NULL,
+    custom_domain VARCHAR(255),
+    status VARCHAR(20) NOT NULL DEFAULT 'draft',
+    current_version_id UUID,
+    published_at TIMESTAMPTZ,
+    deleted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT websites_slug_unique UNIQUE (slug),
+    CONSTRAINT websites_name_not_blank CHECK (btrim(name) <> ''),
+    -- Subdomain-safe: lowercase letters, digits and hyphens; no leading/trailing hyphen.
+    CONSTRAINT websites_slug_format CHECK (slug ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'),
+    CONSTRAINT websites_status_valid CHECK (
+        status IN ('draft', 'published', 'unpublished', 'suspended')
+    ),
+    CONSTRAINT websites_published_has_version CHECK (
+        status <> 'published' OR current_version_id IS NOT NULL
+    )
+);
+
+CREATE UNIQUE INDEX ux_websites_custom_domain_lower
+    ON websites (lower(custom_domain))
+    WHERE custom_domain IS NOT NULL;
+
+CREATE TABLE website_versions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    website_id UUID NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+    generation_id UUID REFERENCES ai_generations(id) ON DELETE SET NULL,
+    version_no INTEGER NOT NULL,
+    bundle_url TEXT NOT NULL,
+    entry_path VARCHAR(255) NOT NULL DEFAULT 'index.html',
+    file_size_bytes BIGINT,
+    note TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT website_versions_no_unique UNIQUE (website_id, version_no),
+    -- Lets websites reference (current_version_id, id) so the current version
+    -- always belongs to the same website.
+    CONSTRAINT website_versions_id_website_unique UNIQUE (id, website_id),
+    CONSTRAINT website_versions_no_positive CHECK (version_no > 0),
+    CONSTRAINT website_versions_url_not_blank CHECK (btrim(bundle_url) <> ''),
+    CONSTRAINT website_versions_size_nonnegative CHECK (
+        file_size_bytes IS NULL OR file_size_bytes >= 0
+    ),
+    CONSTRAINT website_versions_metadata_object CHECK (jsonb_typeof(metadata) = 'object')
+);
+
+-- Deferred so a website and its first version can be created in one transaction.
+ALTER TABLE websites
+    ADD CONSTRAINT websites_current_version_fk
+    FOREIGN KEY (current_version_id, id)
+    REFERENCES website_versions (id, website_id)
+    DEFERRABLE INITIALLY DEFERRED;
+
+-- 13. Public contact form submissions.
+CREATE TABLE contact_messages (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    subject VARCHAR(200) NOT NULL,
+    message TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT contact_messages_name_not_blank CHECK (btrim(name) <> ''),
+    CONSTRAINT contact_messages_email_not_blank CHECK (btrim(email) <> ''),
+    CONSTRAINT contact_messages_subject_not_blank CHECK (btrim(subject) <> ''),
+    CONSTRAINT contact_messages_message_not_blank CHECK (btrim(message) <> '')
+);
+
+-- 14. Functions and triggers.
+
+-- Keep updated_at consistent on mutable records.
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_users_updated_at
+    BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_plans_updated_at
+    BEFORE UPDATE ON plans
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_ai_models_updated_at
+    BEFORE UPDATE ON ai_models
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_subscriptions_updated_at
+    BEFORE UPDATE ON subscriptions
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_transactions_updated_at
+    BEFORE UPDATE ON transactions
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_websites_updated_at
+    BEFORE UPDATE ON websites
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- The credit ledger is append-only.
+CREATE OR REPLACE FUNCTION forbid_ledger_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'credit_transactions is append-only (% is not allowed)', TG_OP;
+END;
+$$;
+
+CREATE TRIGGER trg_credit_transactions_immutable
+    BEFORE UPDATE OR DELETE ON credit_transactions
+    FOR EACH ROW EXECUTE FUNCTION forbid_ledger_mutation();
+
+-- Any starting balance given to a new user is recorded in the ledger, so the
+-- ledger always adds up to users.credits_balance.
+CREATE OR REPLACE FUNCTION record_signup_credits()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.credits_balance > 0 THEN
+        INSERT INTO credit_transactions (user_id, amount, type, description, idempotency_key)
+        VALUES (NEW.id, NEW.credits_balance, 'bonus', 'Signup credits', 'signup:' || NEW.id::TEXT);
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_users_signup_credits
+    AFTER INSERT ON users
+    FOR EACH ROW EXECUTE FUNCTION record_signup_credits();
+
+-- Number of generations a user started today, using Vietnam time for the day
+-- boundary. Failed and canceled jobs do not count; change this if your policy differs.
+-- Call it after the credit debit (which locks the user row) to avoid races.
+CREATE OR REPLACE FUNCTION generations_today(p_user_id UUID)
+RETURNS INTEGER
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT count(*)::INTEGER
+    FROM ai_generations
+    WHERE user_id = p_user_id
+      AND status NOT IN ('failed', 'canceled')
+      AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Ho_Chi_Minh')
+                        AT TIME ZONE 'Asia/Ho_Chi_Minh';
+$$;
+
+-- Users whose balance does not match their ledger. Should always be empty.
+CREATE VIEW v_credit_balance_mismatch AS
+SELECT
+    u.id AS user_id,
+    u.credits_balance,
+    COALESCE(SUM(ct.amount), 0) AS ledger_sum
+FROM users u
+LEFT JOIN credit_transactions ct ON ct.user_id = u.id
+GROUP BY u.id, u.credits_balance
+HAVING u.credits_balance <> COALESCE(SUM(ct.amount), 0);
+
+-- 15. Indexes for common lookups, joins, and user history.
+CREATE INDEX idx_contact_messages_created
+    ON contact_messages (created_at DESC);
+CREATE INDEX idx_subscriptions_user_status
+    ON subscriptions (user_id, status);
+CREATE INDEX idx_transactions_user_created
+    ON transactions (user_id, created_at DESC);
+CREATE INDEX idx_transactions_subscription
+    ON transactions (subscription_id)
+    WHERE subscription_id IS NOT NULL;
+CREATE INDEX idx_payment_events_transaction
+    ON payment_events (transaction_id)
+    WHERE transaction_id IS NOT NULL;
+CREATE INDEX idx_payment_events_pending
+    ON payment_events (status, received_at)
+    WHERE status IN ('received', 'failed');
+CREATE INDEX idx_ai_models_type_active
+    ON ai_models (type, is_active);
+CREATE INDEX idx_ai_generations_user_created
+    ON ai_generations (user_id, created_at DESC);
+CREATE INDEX idx_ai_generations_status_created
+    ON ai_generations (status, created_at);
+CREATE INDEX idx_ai_generations_model_id
+    ON ai_generations (model_id);
+CREATE INDEX idx_generation_assets_generation
+    ON generation_assets (generation_id, asset_type, position);
+CREATE INDEX idx_credit_transactions_user_created
+    ON credit_transactions (user_id, created_at DESC);
+CREATE INDEX idx_credit_transactions_generation
+    ON credit_transactions (generation_id)
+    WHERE generation_id IS NOT NULL;
+CREATE INDEX idx_sessions_user_active
+    ON sessions (user_id, expires_at)
+    WHERE revoked_at IS NULL;
+CREATE INDEX idx_sessions_expires_at
+    ON sessions (expires_at);
+CREATE INDEX idx_websites_user_created
+    ON websites (user_id, created_at DESC)
+    WHERE deleted_at IS NULL;
+CREATE INDEX idx_website_versions_generation
+    ON website_versions (generation_id)
+    WHERE generation_id IS NOT NULL;
+
+-- 15. Initial access roles and free plan. Paid plan prices/limits must be
+-- configured explicitly before offering those plans.
+INSERT INTO roles (id, code, name, description)
+VALUES
+    ('00000000-0000-0000-0000-000000000001', 'user', 'Người dùng', 'Tài khoản người dùng thông thường'),
+    ('00000000-0000-0000-0000-000000000002', 'admin', 'Quản trị viên', 'Tài khoản quản trị hệ thống')
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO plans (
+    code,
+    name,
+    description,
+    price_amount,
+    currency,
+    billing_interval,
+    credits_per_period,
+    max_daily_generations
+)
+VALUES (
+    'free',
+    'Miễn phí',
+    'Gói cơ bản dành cho người dùng mới',
+    0,
+    'VND',
+    'none',
+    10,
+    10
+)
+ON CONFLICT (code) DO NOTHING;
+
+COMMIT;
